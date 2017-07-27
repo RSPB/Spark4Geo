@@ -13,32 +13,35 @@ import com.vividsolutions.jts.geom.Polygon
 
 import scala.collection.JavaConverters._
 
+
+
 object SpatialJoinShp extends App {
+
+  def loadShapefile(path: String, numPartitions: Int = 20): PolygonRDD = {
+    val shp = new ShapefileRDD(sc, path)
+    val polygon = new PolygonRDD(shp.getPolygonRDD, StorageLevel.MEMORY_ONLY)
+    polygon.rawSpatialRDD = polygon.rawSpatialRDD.repartition(numPartitions)
+    polygon.analyze()
+    polygon
+  }
+
   Logger.getLogger("org").setLevel(Level.WARN)
   Logger.getLogger("akka").setLevel(Level.WARN)
 
   val conf = new SparkConf().setAppName("SpatialJoinSpeciesPA").setMaster("local[4]")
   val sc = new SparkContext(conf)
 
-  val wdpa_shp = new ShapefileRDD(sc, "/home/tracek/Data/Spark4Geo/wdpa/wdpa.shp")
-  val species_shp = new ShapefileRDD(sc, "/home/tracek/Data/Spark4Geo/amphib/amphib.shp")
-
-  val wdpa = new PolygonRDD(wdpa_shp.getPolygonRDD, StorageLevel.MEMORY_ONLY)
-  val species = new PolygonRDD(species_shp.getPolygonRDD, StorageLevel.MEMORY_ONLY)
-
-  species.rawSpatialRDD = species.rawSpatialRDD.repartition(20)
-  wdpa.rawSpatialRDD = wdpa.rawSpatialRDD.repartition(20)
-
-  wdpa.analyze()
-  species.analyze()
+  val wdpa = loadShapefile("/home/tracek/Data/Spark4Geo/wdpa/wdpa.shp")
+  val species = loadShapefile("/home/tracek/Data/Spark4Geo/amphib/amphib.shp")
 
   wdpa.spatialPartitioning(GridType.QUADTREE)
   species.spatialPartitioning(wdpa.partitionTree)
 
-  println("Species count: " + species.countWithoutDuplicates())
-  println("WDPA count: " + wdpa.countWithoutDuplicates())
-
   val query = JoinQuery.SpatialJoinQuery(wdpa, species, false, false)
-  val join_result = query.rdd.map((tuple: (Polygon, util.HashSet[Polygon])) => (tuple._1, tuple._2.asScala.map(tuple._1.intersection(_).getArea)) )
-  val intersections = join_result.collect()
+
+  val user_data_sample = JoinQuery.SpatialJoinQuery(wdpa, species, false, false).first()._1.getUserData
+  if (user_data_sample.toString.isEmpty) println("UserData is empty") else println(user_data_sample)
+
+//  val join_result = query.rdd.map((tuple: (Polygon, util.HashSet[Polygon])) => (tuple._1, tuple._2.asScala.map(tuple._1.intersection(_).getArea)) )
+//  val intersections = join_result.collect()
 }
